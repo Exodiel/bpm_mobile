@@ -142,10 +142,13 @@ class _ProductDetails extends StatelessWidget {
     );
   }
 
-  BoxDecoration _buildBoxDecoration() => BoxDecoration(
-      color: Colors.indigo,
-      borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(25), topRight: Radius.circular(25)));
+  BoxDecoration _buildBoxDecoration() => const BoxDecoration(
+        color: Colors.indigo,
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(25),
+          topRight: Radius.circular(25),
+        ),
+      );
 }
 
 class _BackgroundImage extends StatelessWidget {
@@ -157,13 +160,13 @@ class _BackgroundImage extends StatelessWidget {
   Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(25),
-      child: Container(
+      child: SizedBox(
         width: double.infinity,
         height: 400,
         child: url == null
-            ? Image(image: AssetImage('assets/no-image.png'), fit: BoxFit.cover)
+            ? const Image(image: AssetImage('assets/no-image.png'), fit: BoxFit.cover)
             : FadeInImage(
-                placeholder: AssetImage('assets/jar-loading.gif'),
+                placeholder: const AssetImage('assets/jar-loading.gif'),
                 image: NetworkImage(url!),
                 fit: BoxFit.cover,
               ),

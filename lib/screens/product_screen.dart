@@ -64,7 +64,7 @@ class _ProductScreenBody extends StatelessWidget {
                             imageQuality: 100);
 
                         if (pickedFile == null) {
-                          print('No seleccionó nada');
+                          
                           return;
                         }
 

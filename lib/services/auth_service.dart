@@ -5,8 +5,10 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'package:http/http.dart' as http;
 
+import 'package:bpm_mobile/util/utilities.dart';
+
 class AuthService extends ChangeNotifier {
-  final String _baseUrl = 'http://192.168.0.103:8000/api/v1';
+  final String _baseUrl = '$url/api/v1';
   final String _firebaseToken = 'AIzaSyBcytoCbDUARrX8eHpcR-Bdrdq0yUmSjf8';
 
   final storage = const FlutterSecureStorage();
@@ -49,7 +51,6 @@ class AuthService extends ChangeNotifier {
       },
     );
     final Map<String, dynamic> decodedResp = json.decode(resp.body);
-
     if (decodedResp.containsKey('accessToken')) {
       // Token hay que guardarlo en un lugar seguro
       // decodedResp['idToken'];
@@ -62,7 +63,7 @@ class AuthService extends ChangeNotifier {
           }));
       return null;
     } else {
-      return decodedResp['error']['message'];
+      return decodedResp['message'];
     }
   }
 

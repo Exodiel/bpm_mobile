@@ -1,24 +1,158 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
 
+import 'package:awesome_notifications/awesome_notifications.dart';
+import 'package:bpm_mobile/models/notification.dart';
+import 'package:bpm_mobile/models/order.dart';
+import 'package:bpm_mobile/models/report_by_months.dart';
+import 'package:bpm_mobile/screens/update_order_screen.dart';
+import 'package:bpm_mobile/services/dashboard_service.dart';
+import 'package:bpm_mobile/widgets/indicator.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:provider/provider.dart';
 
-import 'package:bpm_mobile/screens/screens.dart';
-
 import 'package:bpm_mobile/services/services.dart';
 import 'package:fl_chart/fl_chart.dart'
     show PieChart, PieChartData, PieChartSectionData;
 
-class HomeScreen extends StatelessWidget {
+import 'package:socket_io_client/socket_io_client.dart' as io;
+import 'package:bpm_mobile/services/awesome_notification_service.dart';
+import 'package:bpm_mobile/util/utilities.dart';
+
+class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  int counter = 0;
+  late io.Socket socket;
+
+  void connect() {
+    socket = io.io(url, <String, dynamic>{
+      'transports': ['websocket'],
+      'autoConnect': false,
+    });
+    socket.connect();
+    socket.onConnect((data) => print('onConnect'));
+    socket.on('new-notification', (data) async {
+      final notification = NotificationModel.fromJson(data);
+      setState(() {
+        counter++;
+      });
+      await createNotificationOnEvent(
+        notification.title,
+        "#${notification.order.sequential}",
+      );
+    });
+    socket.on('new-order', (data) {
+      // print(data);
+      // final order = Order.fromJson(data);
+      // print(order);
+    });
+    socket.on('status-updated', (data) {
+      final order = Order.fromJson(data);
+      print(order);
+    });
+    socket.on('disconnection', (_) => print('disconnect'));
+    print("connected: ${socket.connected}");
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    AwesomeNotifications().isNotificationAllowed().then(
+      (isAllowed) {
+        if (!isAllowed) {
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Allow Notifications'),
+              content:
+                  const Text('Our app would like to send you notifications'),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                  },
+                  child: const Text(
+                    'Don\'t Allow',
+                    style: TextStyle(
+                      color: Colors.grey,
+                      fontSize: 18,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => AwesomeNotifications()
+                      .requestPermissionToSendNotifications()
+                      .then(
+                        (_) => Navigator.pop(context),
+                      ),
+                  child: const Text(
+                    'Allow',
+                    style: TextStyle(
+                      color: Colors.teal,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+      },
+    );
+    AwesomeNotifications().createdStream.listen(
+      (notification) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Notification Created on ${notification.channelKey}',
+            ),
+          ),
+        );
+      },
+    );
+
+    AwesomeNotifications().actionStream.listen((notification) {
+      if (notification.channelKey == 'basic_channel' && Platform.isIOS) {
+        AwesomeNotifications().getGlobalBadgeCounter().then(
+              (value) =>
+                  AwesomeNotifications().setGlobalBadgeCounter(value - 1),
+            );
+      }
+
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const UpdateOrderScreen(),
+        ),
+        (route) => route.isFirst,
+      );
+    });
+    connect();
+  }
+
+  @override
+  void dispose() {
+    AwesomeNotifications().actionSink.close();
+    AwesomeNotifications().createdSink.close();
+    socket.disconnect();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     // final productsService = Provider.of<ProductsService>(context);
     final authService = Provider.of<AuthService>(context, listen: false);
-    const counter = 1;
+    final dashboardService = Provider.of<DashboardService>(context);
     // if (productsService.isLoading) return const LoadingScreen();
 
     return Scaffold(
@@ -29,7 +163,9 @@ class HomeScreen extends StatelessWidget {
             children: <Widget>[
               IconButton(
                 icon: const Icon(Icons.notifications),
-                onPressed: () {},
+                onPressed: () {
+                  Navigator.pushNamed(context, 'notifications');
+                },
               ),
               counter != 0
                   ? Positioned(
@@ -59,7 +195,9 @@ class HomeScreen extends StatelessWidget {
             ],
           ),
           IconButton(
-            icon: const Icon(Icons.login_outlined),
+            icon: const Icon(
+              Icons.login_outlined,
+            ),
             onPressed: () {
               authService.logout();
               Navigator.pushReplacementNamed(context, 'login');
@@ -68,28 +206,67 @@ class HomeScreen extends StatelessWidget {
         ],
       ),
       body: FutureBuilder(
-          future: authService.readToken(),
-          builder: (BuildContext context, AsyncSnapshot<String> snapshot) {
-            if (!snapshot.hasData) return const Text('');
-            final data = jsonDecode(snapshot.data!);
-            print(data);
-            return _buildBody(context);
-          }),
+        future: authService.readToken(),
+        builder: (BuildContext context, AsyncSnapshot<String> snapshot) {
+          if (!snapshot.hasData) return const Text('');
+          final data = jsonDecode(snapshot.data!);
+          if (data['rol'] == 'admin') {}
+          return _buildAdminBody(context, dashboardService);
+        },
+      ),
     );
   }
 
-  _buildBody(BuildContext context) {
+  _buildOtherRolBody(BuildContext context) {}
+
+  _buildAdminBody(BuildContext context, DashboardService dashboardService) {
     return CustomScrollView(
       slivers: <Widget>[
-        _buildStats(),
+        _buildStats(dashboardService),
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.all(10.0),
             child: _buildTitledContainer(
               "Ventas",
-              child: SizedBox(
-                height: 200,
-                child: DonutPieChart.withSampleData(),
+              child: FutureBuilder(
+                future: dashboardService.getTotalsByMonth(),
+                builder: (_, AsyncSnapshot<List<ReportByMonth>> snapshot) {
+                  final data = snapshot.data;
+                  if (snapshot.hasData) {
+                    return AspectRatio(
+                      aspectRatio: 1.3,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: AspectRatio(
+                              aspectRatio: 1,
+                              child: DonutPieChart.withSampleData(data!),
+                            ),
+                          ),
+                          Column(
+                            mainAxisSize: MainAxisSize.max,
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: linear.map((e) {
+                              return Column(
+                                children: [
+                                  Indicator(
+                                    color: e.color,
+                                    text: e.month,
+                                    isSquare: true,
+                                  ),
+                                ],
+                              );
+                            }).toList(),
+                          )
+                        ],
+                      ),
+                    );
+                  }
+                  return const Center(
+                    child: CircularProgressIndicator(),
+                  );
+                },
               ),
             ),
           ),
@@ -99,7 +276,7 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  SliverPadding _buildStats() {
+  SliverPadding _buildStats(DashboardService dashboardService) {
     const TextStyle stats = TextStyle(
       fontWeight: FontWeight.bold,
       fontSize: 20.0,
@@ -122,9 +299,27 @@ class HomeScreen extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                const Text(
-                  "+1",
-                  style: stats,
+                FutureBuilder(
+                  future: dashboardService.getTotalSuppliers(),
+                  builder: (context, AsyncSnapshot<int> snapshot) {
+                    int? counter = snapshot.data;
+                    if (snapshot.hasData) {
+                      if (counter != null) {
+                        return Text(
+                          "+$counter",
+                          style: stats,
+                        );
+                      }
+                      return const Text(
+                        "+0",
+                        style: stats,
+                      );
+                    }
+                    return const Text(
+                      "+0",
+                      style: stats,
+                    );
+                  },
                 ),
                 const SizedBox(height: 5.0),
                 Text("Proveedores".toUpperCase())
@@ -140,9 +335,27 @@ class HomeScreen extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                const Text(
-                  "+1",
-                  style: stats,
+                FutureBuilder(
+                  future: dashboardService.getTotalCustomers(),
+                  builder: (context, AsyncSnapshot<int> snapshot) {
+                    int? counter = snapshot.data;
+                    if (snapshot.hasData) {
+                      if (counter != null) {
+                        return Text(
+                          "+$counter",
+                          style: stats,
+                        );
+                      }
+                      return const Text(
+                        "+0",
+                        style: stats,
+                      );
+                    }
+                    return const Text(
+                      "+0",
+                      style: stats,
+                    );
+                  },
                 ),
                 const SizedBox(height: 5.0),
                 Text(
@@ -160,9 +373,27 @@ class HomeScreen extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                const Text(
-                  "+2",
-                  style: stats,
+                FutureBuilder(
+                  future: dashboardService.getTotalOrders(),
+                  builder: (context, AsyncSnapshot<int> snapshot) {
+                    int? counter = snapshot.data;
+                    if (snapshot.hasData) {
+                      if (counter != null) {
+                        return Text(
+                          "+$counter",
+                          style: stats,
+                        );
+                      }
+                      return const Text(
+                        "+0",
+                        style: stats,
+                      );
+                    }
+                    return const Text(
+                      "+0",
+                      style: stats,
+                    );
+                  },
                 ),
                 const SizedBox(height: 5.0),
                 Text(
@@ -221,8 +452,11 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Container _buildTitledContainer(String title,
-      {Widget? child, double? height}) {
+  Container _buildTitledContainer(
+    String title, {
+    Widget? child,
+    double? height,
+  }) {
     return Container(
       padding: const EdgeInsets.all(16.0),
       width: double.infinity,
@@ -236,7 +470,10 @@ class HomeScreen extends StatelessWidget {
         children: <Widget>[
           Text(
             title,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 28.0),
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 28.0,
+            ),
           ),
           if (child != null) ...[const SizedBox(height: 10.0), child]
         ],
@@ -245,15 +482,29 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
+class IndicatorData {
+  Color color;
+  String month;
+
+  IndicatorData({
+    required this.month,
+    required this.color,
+  });
+}
+
+List<IndicatorData> linear = [];
+
 class DonutPieChart extends StatelessWidget {
   final List<PieChartSectionData> seriesList;
 
-  const DonutPieChart(this.seriesList);
+  DonutPieChart(
+    this.seriesList,
+  );
 
   /// Creates a [PieChart] with sample data and no transition.
-  factory DonutPieChart.withSampleData() {
+  factory DonutPieChart.withSampleData(List<ReportByMonth> report) {
     return DonutPieChart(
-      _createSampleData(),
+      _createSampleData(report),
     );
   }
 
@@ -271,50 +522,37 @@ class DonutPieChart extends StatelessWidget {
   }
 
   /// Create one series with sample hard coded data.
-  static List<PieChartSectionData> _createSampleData() {
-    final data = [
-      PieChartSectionData(
-        value: 100,
-        title: "July",
-        color: Colors.red.shade400,
-        titleStyle: const TextStyle(
-          color: Colors.black,
-          fontWeight: FontWeight.bold,
-        ),
-        titlePositionPercentageOffset: 1,
-      ),
-      PieChartSectionData(
-        title: "August",
-        value: 75,
-        color: Colors.blue.shade400,
-        titleStyle: const TextStyle(
-          color: Colors.black,
-          fontWeight: FontWeight.bold,
-        ),
-        titlePositionPercentageOffset: 1,
-      ),
-      PieChartSectionData(
-        title: "September",
-        value: 25,
-        color: Colors.green.shade400,
-        titleStyle: const TextStyle(
-          color: Colors.black,
-          fontWeight: FontWeight.bold,
-        ),
-        titlePositionPercentageOffset: 1,
-      ),
-      PieChartSectionData(
-        title: "October",
-        value: 50,
-        color: Colors.purple.shade400,
-        titleStyle: const TextStyle(
-          color: Colors.black,
-          fontWeight: FontWeight.bold,
-        ),
-        titlePositionPercentageOffset: 1,
-      ),
+  static List<PieChartSectionData> _createSampleData(
+    List<ReportByMonth> report,
+  ) {
+    final colors = [
+      Colors.red.shade400,
+      Colors.blue.shade400,
+      Colors.green.shade400,
+      Colors.purple.shade400,
     ];
-
+    linear = [];
+    Random random = Random();
+    final data = report.map((e) {
+      final rng = random.nextInt(3);
+      final color = colors[rng];
+      linear.add(
+        IndicatorData(
+          month: month(e.month),
+          color: color,
+        ),
+      );
+      return PieChartSectionData(
+        value: double.parse(e.total),
+        title: e.total,
+        color: color,
+        titleStyle: const TextStyle(
+          color: Colors.black,
+          fontWeight: FontWeight.bold,
+        ),
+        titlePositionPercentageOffset: 1,
+      );
+    }).toList();
     return data;
   }
 }
@@ -330,11 +568,17 @@ class LinearSales {
 class Activity {
   final String? title;
   final IconData? icon;
-  Activity({this.title, this.icon});
+  final VoidCallback onpress;
+  Activity({
+    this.title,
+    this.icon,
+    required this.onpress,
+  });
 }
 
 final List<Activity> activities = [
-  Activity(title: "Pedidos", icon: FontAwesomeIcons.listOl),
-  Activity(title: "Productos", icon: FontAwesomeIcons.solidBell),
-  Activity(title: "Recorridos", icon: FontAwesomeIcons.truckMoving),
+  Activity(title: "Pedidos", icon: FontAwesomeIcons.listOl, onpress: () {}),
+  Activity(title: "Productos", icon: FontAwesomeIcons.boxOpen, onpress: () {}),
+  Activity(
+      title: "Recorridos", icon: FontAwesomeIcons.truckMoving, onpress: () {}),
 ];

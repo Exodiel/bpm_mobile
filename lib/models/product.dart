@@ -4,8 +4,6 @@
 
 import 'dart:convert';
 
-import 'package:bpm_mobile/models/models.dart';
-
 class Product {
   Product(
       {required this.available,

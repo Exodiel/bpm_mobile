@@ -116,15 +116,13 @@ class _LoginForm extends StatelessWidget {
 
                       loginForm.isLoading = true;
 
-                      // TODO: validar si el login es correcto
+                   
                       final String? errorMessage = await authService.createUser(
                           loginForm.email, loginForm.password);
 
                       if (errorMessage == null) {
                         Navigator.pushReplacementNamed(context, 'home');
                       } else {
-                        // TODO: mostrar error en pantalla
-                        print(errorMessage);
                         loginForm.isLoading = false;
                       }
                     })
